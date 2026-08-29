@@ -2,18 +2,6 @@
     z150 - прошивка хронографа страйкбольного Z150
     made by ivan505
 */
-#include <Arduino.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
-#include <stdio.h>
-#include "orc.h"
-
-#define TIME_LED 100 // время мерцания
-
-#define Z_IN       3 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
-#define FIRST_IN   8 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
-#define SECOND_IN 12 // 2-ой индекс дисплея с котрого начинается кастомное символьно число
-#define THIRD_IN  16 // 3-ий индекс дисплея с котрого начинается кастомное символьно число
 
 /*
 WM0 - меньше нуля
@@ -23,11 +11,30 @@ NS   - скорость нормальная
 WDE  - энергия больше максимально допущенной
 */
 
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <stdio.h>
+#include "orc.h"
+
+
+#define TIME_LED 100 // время мерцания
+#define Z_IN       3 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
+#define FIRST_IN   8 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
+#define SECOND_IN 12 // 2-ой индекс дисплея с котрого начинается кастомное символьно число
+#define THIRD_IN  16 // 3-ий индекс дисплея с котрого начинается кастомное символьно число
+
+
 last4rounds l4r = {0,0,0,0};
+queue_n quen;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
+// ДАННЫЕ
 int rounds_per_session = 0;
 double new_v;
+double avg_v_last_n;       // средняя скорость выстрела за SHOT_N шаров
+double avg_v_last_session; // средняя скорость выстрела за сессию
 char w_code[3];
 
 // НАСТРОЙКИ
@@ -39,10 +46,6 @@ double MASS       = 0.3; // вес шара                              (г)   
 double MAX_E      = 3.0; // максимальная энергия выстрела         (джоуль) MX_E
 int    SHOT_N     = 100; // количество выстрелов для замеров      (штук)   ST_N
 
-// ДАННЫЕ
-double avg_v_last30;       // средняя скорость выстрела за 30 шаров
-double avg_v_last_session; // средняя скорость выстрела за сессию
-
 // символы для больших цифр
 byte slash_r[] = {B00011,B00111,B00111,B01111,B11110,B11100,B11100,B11000};
 byte slash_l[] = {B11000,B11100,B11100,B11110,B01111,B00111,B00111,B00011};
@@ -52,12 +55,6 @@ byte tri_rd[]  = {B00001,B00011,B00011,B00111,B00111,B01111,B01111,B11111};
 byte tri_ru[]  = {B11111,B11110,B11110,B11100,B11100,B11000,B11000,B10000};
 byte tri_ld[]  = {B10000,B11000,B11000,B11100,B11100,B11110,B11110,B11111};
 byte tri_lu[]  = {B11111,B01111,B01111,B00111,B00111,B00011,B00011,B00001};
-
-/*             0        1       2    3      4      5       6        7
-byte *tcn[] = {slash_r, slash_l, up, down, tri_rd, tri_ru, tri_ld, tri_lu};
-                                              /       0/     \       \0
-                  /      \       -    _      /0       /      0\       \
-*/
 
 //символы цифр 4 на 4
 int custom_nums[10][4][4] = {   
@@ -123,11 +120,7 @@ int custom_nums[10][4][4] = {
                                 }
 };
 
-/*             0        1       2    3      4      5       6        7
-byte *tcn[] = {slash_r, slash_l, up, down, tri_rd, tri_ru, tri_ld, tri_lu};
-                                              /       0/     \       \0
-                  /      \       -    _      /0       /      0\       \
-*/
+
 int custom_letters[1][4][4] = {   
                                 {   
                                     {2, 2, 2, 5},
@@ -137,6 +130,7 @@ int custom_letters[1][4][4] = {
                                 },
 
 };
+
 // регистрация кастомных символов
 void register_custom_symbols(){
     lcd.createChar(0, slash_r);
@@ -157,6 +151,8 @@ void print_symbols(const char* symbols, int row, int col){
 
 void print_symbols(double num_symbols, int row, int col){
     char symbols[6];
+    if (num_symbols < 100) col++;
+    if (num_symbols < 10) col++;
     dtostrf(num_symbols, 0, 0, symbols); 
     print_symbols(symbols, row, col);
 }
@@ -198,18 +194,19 @@ void print_settings(){
     print_symbols(shot_n, 2, 14);
 }
 
-// выводит символ числа на позициюв дисплее
+// выводит символ числа на позицию в дисплее
 void print_custom_sybmol_num(int num, int lcd_i){
     if (num < 0 || num > 9 || (lcd_i != FIRST_IN && lcd_i != SECOND_IN && lcd_i != THIRD_IN)) return;
     if (num == 0 && lcd_i == FIRST_IN) return;
+    if (new_v == 0 && lcd_i == SECOND_IN) return;
     for (int row = 0; row < 4; row++){
         for (int col = 0; col < 4; col++){
             int val = custom_nums[num][row][col];
             lcd.setCursor(lcd_i + col, row);
             if (val == 8) {
-                lcd.write(255);  // Полный блок 
+                lcd.write(255);  // полный блок 
             } else if (val == 9) {
-                lcd.write(' ');   // Пробел
+                lcd.write(' ');   // пробел
             } else {
                 lcd.write(val);   
             }
@@ -232,7 +229,7 @@ void default_print(){
     print_symbols(l4r.v1, 3, 0);
 
     print_symbols(rounds_per_session, 0, 5);
-    print_symbols(avg_v_last30, 1, 5);
+    print_symbols(avg_v_last_n, 1, 5);
     print_symbols(avg_v_last_session, 2, 5);
     print_symbols(w_code, 3, 5);
 
@@ -264,25 +261,50 @@ void print_big_symbol_letter(char letter, int lcd_i){
     }
 }
 
+// вывод во всю матрицу
+void print_204(int matrix[4][20]){
+    for (int i = 0; i < 4; i++){
+        for (int j = 0; j < 20; j++){
+            if (matrix[i][j] == 1){
+                lcd.setCursor(j, i);
+                lcd.write(255);
+            }
+        }
+    }
+}
+
 // получить скорость выстрела(м/c)
-double zamer_v(double time_s, double time_e){
+double zamer_v(int time_s, int time_e){
     return DISTANCE / (time_e - time_s);
+}
+
+void print_data_field(char* code_e){
+    print_symbols(code_e, 3, 4);
 }
 
 // получить энергию в джоулях
 double zamer_e(double v, double mass){
-    double e = mass * v * v / 2;
-    if (e > MAX_E) printf("WDE");
+    double e = mass/1000 * v * v / 2;
+    if (e > MAX_E){ 
+        print_data_field("WDE");
+    }
     return e;
 }
 
 // получить среднюю скорость за последние SHOT_N выстрелов
-double get_avg_v_last_n(double* lastn_t){
+double get_avg_v_last_n(queue_n *quen){
     double all_t = 0;
-    for (int i = 0 ; i < SHOT_N; i++){
-        all_t += lastn_t[i];
+    noda_n* temp = quen->head;
+    int k = 0;
+    int shots = SHOT_N;
+    while (k != SHOT_N || temp->value != 0){
+        all_t += temp->value;
+        temp = temp->next;
+        k++;
     }
-    return SHOT_N * DISTANCE / all_t;
+    free(temp);
+    if (k != SHOT_N) shots = k;
+    return shots * DISTANCE / all_t;
 }
 
 // получить средня скорость выстра за всю сессию
@@ -298,18 +320,18 @@ double get_avg_v_last_session(double* last_sessions_t, int rounds_per_session){
 double get_validate_shot_v(double shot_v){
     double shot_vt;
     if (shot_v < 0){
-        print_symbols("WM0", 3, 4);
+        print_data_field("WM0");
         return EXPECTED_V;
     }
     if (shot_vt < MIN_V){
-        print_symbols("WMm", 3, 4);
+        print_data_field("WMm");
         return EXPECTED_V;
     }
     if (shot_vt > MAX_V){
-        print_symbols("WMn", 3, 4);
+        print_data_field("WMn");
         return EXPECTED_V;
     }
-    print_symbols("NS", 3, 4);
+    print_data_field("NS");
     return shot_v;
 }
 
@@ -319,17 +341,7 @@ double get_new_v(){
     return 0;
 }
 
-// вывод во всю матрицу
-void print_204(int matrix[4][20]){
-    for (int i = 0; i < 4; i++){
-        for (int j = 0; j < 20; j++){
-            if (matrix[i][j] == 1){
-                lcd.setCursor(j, i);
-                lcd.write(255);
-            }
-        }
-    }
-}
+
 
 // старт программы
 void setup() {
@@ -347,6 +359,7 @@ void setup() {
     print_settings();
     delay(TIME_LED*15);
     lcd.clear();
+    new_queue_n(&quen, SHOT_N);
     default_print();
 }
 
@@ -355,6 +368,8 @@ void update(){
     new_v = get_new_v();
     new_v = get_validate_shot_v(new_v);
     rounds_per_session++;
+    qn_add(&quen, new_v);
+    avg_v_last_n = get_avg_v_last_n(&quen);
     update_l4r(l4r, new_v);
     default_print();
 }
