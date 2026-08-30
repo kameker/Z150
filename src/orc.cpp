@@ -1,4 +1,4 @@
-#include "orc.h"
+#include "orc.hpp"
 #include <stdlib.h>
 
 void update_l4r(last4rounds l4r, double new_v){

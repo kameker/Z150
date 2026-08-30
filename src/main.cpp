@@ -16,7 +16,8 @@ WDE  - энергия больше максимально допущенной
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <stdio.h>
-#include "orc.h"
+#include "orc.hpp"
+#include "custom_symbols.hpp"
 
 
 #define TIME_LED 100 // время мерцания
@@ -31,6 +32,7 @@ queue_n quen;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 // ДАННЫЕ
+double summ_v;
 int rounds_per_session = 0;
 double new_v;
 double avg_v_last_n;       // средняя скорость выстрела за SHOT_N шаров
@@ -45,103 +47,6 @@ double EXPECTED_V = 120; // ожидаемая скорость                 
 double MASS       = 0.3; // вес шара                              (г)      MASS
 double MAX_E      = 3.0; // максимальная энергия выстрела         (джоуль) MX_E
 int    SHOT_N     = 100; // количество выстрелов для замеров      (штук)   ST_N
-
-// символы для больших цифр
-byte slash_r[] = {B00011,B00111,B00111,B01111,B11110,B11100,B11100,B11000};
-byte slash_l[] = {B11000,B11100,B11100,B11110,B01111,B00111,B00111,B00011};
-byte up[]      = {B11111,B11111,B11111,B11111,B00000,B00000,B00000,B00000};
-byte down[]    = {B00000,B00000,B00000,B00000,B11111,B11111,B11111,B11111};
-byte tri_rd[]  = {B00001,B00011,B00011,B00111,B00111,B01111,B01111,B11111};
-byte tri_ru[]  = {B11111,B11110,B11110,B11100,B11100,B11000,B11000,B10000};
-byte tri_ld[]  = {B10000,B11000,B11000,B11100,B11100,B11110,B11110,B11111};
-byte tri_lu[]  = {B11111,B01111,B01111,B00111,B00111,B00011,B00011,B00001};
-
-//символы цифр 4 на 4
-int custom_nums[10][4][4] = {   
-                                {   
-                                    {4, 2, 2, 6},
-                                    {8, 9, 9, 8},
-                                    {8, 9, 9, 8},
-                                    {7, 3, 3, 5}// 0
-                                },
-                                {   
-                                    {9, 9, 0, 6},
-                                    {9, 0, 9, 8},
-                                    {9, 9, 9, 8},
-                                    {9, 9, 9, 8}// 1
-                                },
-                                {   
-                                    {4, 8, 8, 6},
-                                    {9, 9, 4, 5},
-                                    {9, 4, 5, 9},
-                                    {4, 8, 8, 6}// 2
-                                },
-                                {   
-                                    {4, 8, 8, 6},
-                                    {9, 9, 4, 5},
-                                    {9, 9, 7, 6},
-                                    {7, 8, 8, 5}// 3
-                                },
-                                {   
-                                    {9, 8, 9, 8},
-                                    {9, 7, 3, 8},
-                                    {9, 9, 9, 8},
-                                    {9, 9, 9, 8}// 4
-                                },
-                                {   
-                                    {4, 2, 2, 2},
-                                    {7, 6, 9, 9},
-                                    {9, 2, 2, 6},
-                                    {3, 3, 3, 5}// 5
-                                },
-                                {   
-                                    {0, 2, 2, 1},
-                                    {1, 3, 3, 9},
-                                    {0, 2, 2, 1},
-                                    {1, 3, 3, 0}// 6
-                                },
-                                {   
-                                    {4, 8, 8, 6},
-                                    {9, 9, 4, 5},
-                                    {9, 4, 5, 9},
-                                    {4, 5, 9, 9}// 7
-                                },
-                                {   
-                                    {0, 2, 2, 1},
-                                    {1, 3, 3, 0},
-                                    {0, 2, 2, 1},
-                                    {1, 3, 3, 0}// 8
-                                },
-                                {   
-                                    {9, 0, 2, 1},
-                                    {9, 1, 3, 0},
-                                    {9, 9, 0, 9},
-                                    {9, 0, 9, 9}// 9
-                                }
-};
-
-
-int custom_letters[1][4][4] = {   
-                                {   
-                                    {2, 2, 2, 5},
-                                    {9, 9, 0, 9},
-                                    {9, 0, 9, 9},
-                                    {4, 3, 3, 3}// z
-                                },
-
-};
-
-// регистрация кастомных символов
-void register_custom_symbols(){
-    lcd.createChar(0, slash_r);
-    lcd.createChar(1, slash_l);
-    lcd.createChar(2, up);
-    lcd.createChar(3, down);
-    lcd.createChar(4, tri_rd);
-    lcd.createChar(5, tri_ru);
-    lcd.createChar(6, tri_ld);
-    lcd.createChar(7, tri_lu);
-}
 
 // вывод символов
 void print_symbols(const char* symbols, int row, int col){
@@ -308,12 +213,8 @@ double get_avg_v_last_n(queue_n *quen){
 }
 
 // получить средня скорость выстра за всю сессию
-double get_avg_v_last_session(double* last_sessions_t, int rounds_per_session){
-    double all_t = 0;
-    for (int i = 0 ; i < rounds_per_session; i++){
-        all_t += last_sessions_t[i];
-    }
-    return rounds_per_session * DISTANCE / all_t;
+double get_avg_v_last_session(){
+    return summ_v / rounds_per_session;
 }
 
 // получить валидированный выстрел
@@ -341,13 +242,11 @@ double get_new_v(){
     return 0;
 }
 
-
-
 // старт программы
 void setup() {
     lcd.init();
     lcd.backlight();
-    register_custom_symbols();
+    register_custom_symbols(lcd);
     
     for (int i = 0 ; i < 3; i++){
         print_big_symbol_letter('z', Z_IN);
@@ -368,8 +267,10 @@ void update(){
     new_v = get_new_v();
     new_v = get_validate_shot_v(new_v);
     rounds_per_session++;
+    summ_v += new_v;
     qn_add(&quen, new_v);
     avg_v_last_n = get_avg_v_last_n(&quen);
+    avg_v_last_session = get_avg_v_last_session();
     update_l4r(l4r, new_v);
     default_print();
 }

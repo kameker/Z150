@@ -1,3 +1,13 @@
+#ifndef ORC_H
+#define ORC_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+
 typedef struct
 {
     double v1;
@@ -7,10 +17,6 @@ typedef struct
 } last4rounds;
 
 void update_l4r(last4rounds l4r, double new_v);
-
-
-#include <stdio.h>
-#include <stdlib.h>
 
 typedef struct Noda {
     double value;
@@ -28,3 +34,8 @@ void qn_add(queue_n* quen, double value);
 void new_queue_n(queue_n* quen, int size);
 void new_noda_n(noda_n** nodn, double value);
 
+#ifdef __cplusplus
+}
+#endif
+
+#endif // ORC_H
