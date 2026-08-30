@@ -18,11 +18,17 @@ WDE  - энергия больше максимально допущенной
 #include "orc.hpp"
 #include "custom_symbols.hpp"
 
-#define TIME_LED 100 // время мерцания
-#define Z_IN       3 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
-#define FIRST_IN   8 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
-#define SECOND_IN 12 // 2-ой индекс дисплея с котрого начинается кастомное символьно число
-#define THIRD_IN  16 // 3-ий индекс дисплея с котрого начинается кастомное символьно число
+#define TIME_LED 100        // время мерцания
+#define Z_IN       3        // 1-ый индекс дисплея с котрого начинается кастомное символьно число
+#define FIRST_IN   8        // 1-ый индекс дисплея с котрого начинается кастомное символьно число
+#define SECOND_IN 12        // 2-ой индекс дисплея с котрого начинается кастомное символьно число
+#define THIRD_IN  16        // 3-ий индекс дисплея с котрого начинается кастомное символьно число
+
+#define SIZE_NUM_INT 6      // кол-во разрядов для вывода целого числа
+#define SIZE_NUM_FLOAT 8    // кол-во разрядов для вывода целого числа
+
+uint8_t SENSOR_PIN_1 = 7;   // пин 1-го датчика
+uint8_t SENSOR_PIN_2 = 8;   // пин 2-го датчика
 
 last4rounds l4r = {0,0,0,0};
 queue_n quen;
@@ -30,22 +36,24 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 // ДАННЫЕ
 double summ_v;
-int rounds_per_session = 0;
-double new_v;
+unsigned int rounds_per_session = 0;
+double new_v = 0;
 double avg_v_last_n;       // средняя скорость выстрела за SHOT_N шаров
 double avg_v_last_session; // средняя скорость выстрела за сессию
-char *w_code;
+const char *w_code = "NS";
 bool start = false;
 bool finish = false;
+volatile unsigned long start_time = 0;
+volatile bool shot_detected = false;
 
 // НАСТРОЙКИ
-double DISTANCE   = 0.1; // расстояние                            (м)      DIST
-double MIN_V      =  80; // минимальная скорость выстрела         (м/с)    MN_V
-double MAX_V      = 150; // максимальная скорость выстрела        (м/с)    MX_V
-double EXPECTED_V = 120; // ожидаемая скорость                    (м/с)    ED_V
-double MASS       = 0.3; // вес шара                              (г)      MASS
-double MAX_E      = 3.0; // максимальная энергия выстрела         (джоуль) MX_E
-int    SHOT_N     = 100; // количество выстрелов для замеров      (штук)   ST_N
+double DISTANCE         = 0.1; // расстояние                            (м)      DIST
+double MIN_V            =  80; // минимальная скорость выстрела         (м/с)    MN_V
+double MAX_V            = 150; // максимальная скорость выстрела        (м/с)    MX_V
+double EXPECTED_V       = 120; // ожидаемая скорость                    (м/с)    ED_V
+double MASS             = 0.3; // вес шара                              (г)      MASS
+double MAX_E            = 3.0; // максимальная энергия выстрела         (джоуль) MX_E
+unsigned int SHOT_N     = 100; // количество выстрелов для замеров      (штук)   ST_N
 
 // вывод символов
 void print_symbols(LiquidCrystal_I2C lcdt, const char* symbols, int row, int col){
@@ -54,7 +62,7 @@ void print_symbols(LiquidCrystal_I2C lcdt, const char* symbols, int row, int col
 }
 
 void print_symbols(LiquidCrystal_I2C lcdt, double num_symbols, int row, int col){
-    char symbols[6];
+    char symbols[SIZE_NUM_INT];
     if (num_symbols < 100) col++;
     if (num_symbols < 10) col++;
     dtostrf(num_symbols, 0, 0, symbols); 
@@ -63,13 +71,13 @@ void print_symbols(LiquidCrystal_I2C lcdt, double num_symbols, int row, int col)
 
 // вывод настроек
 void print_settings(LiquidCrystal_I2C lcdt){
-    char distance[8];
-    char min_v[6];
-    char max_v[6];
-    char expected_v[6];
-    char mass[8];
-    char max_e[8];
-    char shot_n[6];
+    char distance[SIZE_NUM_INT + 2];
+    char min_v[SIZE_NUM_INT];
+    char max_v[SIZE_NUM_INT];
+    char expected_v[SIZE_NUM_INT];
+    char mass[SIZE_NUM_FLOAT];
+    char max_e[SIZE_NUM_FLOAT];
+    char shot_n[SIZE_NUM_INT];
 
     print_symbols(lcdt, "DIST", 0, 0);
     print_symbols(lcdt, "MN_V", 1, 0);
@@ -178,7 +186,8 @@ void print_204(int matrix[4][20]){
 }
 
 // получить скорость выстрела(м/c)
-double zamer_v(int time_s, int time_e){
+double zamer_v(unsigned long time_s, unsigned long time_e){
+    if (time_e - time_s < 0) return -1;
     return DISTANCE / (time_e - time_s);
 }
 
@@ -197,37 +206,39 @@ double zamer_e(double v, double mass){
 
 // получить среднюю скорость за последние SHOT_N выстрелов
 double get_avg_v_last_n(queue_n *quen){
+    if (quen->head == NULL) return 0;
+    
     double all_t = 0;
     noda_n* temp = quen->head;
     int k = 0;
-    int shots = SHOT_N;
-    while (k != SHOT_N || temp->value != 0){
+    
+    while (temp != NULL && k < SHOT_N){
         all_t += temp->value;
         temp = temp->next;
         k++;
     }
-    free(temp);
-    if (k != SHOT_N) shots = k;
-    return shots * DISTANCE / all_t;
+    
+    if (k == 0 || all_t == 0) return 0;
+    return (k * DISTANCE) / all_t;
 }
 
 // получить средня скорость выстра за всю сессию
 double get_avg_v_last_session(){
+    if (rounds_per_session == 0) return 0;
     return summ_v / rounds_per_session;
 }
 
 // получить валидированный выстрел
 double get_validate_shot_v(double shot_v){
-    double shot_vt;
     if (shot_v < 0){
         w_code = "WM0";
         return EXPECTED_V;
     }
-    if (shot_vt < MIN_V){
+    if (shot_v < MIN_V){
         w_code = "WMm";
         return EXPECTED_V;
     }
-    if (shot_vt > MAX_V){
+    if (shot_v > MAX_V){
         w_code = "WMn";
         return EXPECTED_V;
     }
@@ -235,9 +246,26 @@ double get_validate_shot_v(double shot_v){
     return shot_v;
 }
 
-// получить новую скорость
+// В прерывании или при обнаружении выстрела
+void on_shot_start() {
+    start_time = micros();
+    start = true;
+}
+
+void on_shot_end() {
+    unsigned long end_time = micros();
+    if (start_time > 0) {
+        new_v = zamer_v(start_time, end_time);
+        finish = true;
+        start_time = 0;    
+    }
+}
+
 double get_new_v(){
-    //zamer_v()
+    if (finish) {
+        finish = false;
+        return new_v;
+    }
     return 0;
 }
 
@@ -259,6 +287,10 @@ void setup() {
     lcd.clear();
     new_queue_n(&quen, SHOT_N);
     default_print(lcd);
+    pinMode(SENSOR_PIN_1, INPUT_PULLUP);
+    pinMode(SENSOR_PIN_2, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(SENSOR_PIN_1), on_shot_start, RISING);
+    attachInterrupt(digitalPinToInterrupt(SENSOR_PIN_2), on_shot_end, RISING);
 }
 
 // обновление стандартного экрана
@@ -271,6 +303,8 @@ void update(){
     avg_v_last_n = get_avg_v_last_n(&quen);
     avg_v_last_session = get_avg_v_last_session();
     update_l4r(l4r, new_v);
+    start = false;
+    finish = false;
     default_print(lcd);
 }
 
