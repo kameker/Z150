@@ -11,7 +11,6 @@ NS   - скорость нормальная
 WDE  - энергия больше максимально допущенной
 */
 
-
 #include <Arduino.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -19,13 +18,11 @@ WDE  - энергия больше максимально допущенной
 #include "orc.hpp"
 #include "custom_symbols.hpp"
 
-
 #define TIME_LED 100 // время мерцания
 #define Z_IN       3 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
 #define FIRST_IN   8 // 1-ый индекс дисплея с котрого начинается кастомное символьно число
 #define SECOND_IN 12 // 2-ой индекс дисплея с котрого начинается кастомное символьно число
 #define THIRD_IN  16 // 3-ий индекс дисплея с котрого начинается кастомное символьно число
-
 
 last4rounds l4r = {0,0,0,0};
 queue_n quen;
@@ -37,7 +34,9 @@ int rounds_per_session = 0;
 double new_v;
 double avg_v_last_n;       // средняя скорость выстрела за SHOT_N шаров
 double avg_v_last_session; // средняя скорость выстрела за сессию
-char w_code[3];
+char *w_code;
+bool start = false;
+bool finish = false;
 
 // НАСТРОЙКИ
 double DISTANCE   = 0.1; // расстояние                            (м)      DIST
@@ -49,21 +48,21 @@ double MAX_E      = 3.0; // максимальная энергия выстре
 int    SHOT_N     = 100; // количество выстрелов для замеров      (штук)   ST_N
 
 // вывод символов
-void print_symbols(const char* symbols, int row, int col){
-    lcd.setCursor(col, row);
-    lcd.printstr(symbols);
+void print_symbols(LiquidCrystal_I2C lcdt, const char* symbols, int row, int col){
+    lcdt.setCursor(col, row);
+    lcdt.printstr(symbols);
 }
 
-void print_symbols(double num_symbols, int row, int col){
+void print_symbols(LiquidCrystal_I2C lcdt, double num_symbols, int row, int col){
     char symbols[6];
     if (num_symbols < 100) col++;
     if (num_symbols < 10) col++;
     dtostrf(num_symbols, 0, 0, symbols); 
-    print_symbols(symbols, row, col);
+    print_symbols(lcdt, symbols, row, col);
 }
 
 // вывод настроек
-void print_settings(){
+void print_settings(LiquidCrystal_I2C lcdt){
     char distance[8];
     char min_v[6];
     char max_v[6];
@@ -72,15 +71,15 @@ void print_settings(){
     char max_e[8];
     char shot_n[6];
 
-    print_symbols("DIST", 0, 0);
-    print_symbols("MN_V", 1, 0);
-    print_symbols("MX_V", 2, 0);
-    print_symbols("ED_V", 3, 0);
+    print_symbols(lcdt, "DIST", 0, 0);
+    print_symbols(lcdt, "MN_V", 1, 0);
+    print_symbols(lcdt, "MX_V", 2, 0);
+    print_symbols(lcdt, "ED_V", 3, 0);
     
-    print_symbols("MASS", 0, 9);
-    print_symbols("MX_E", 1, 9);
-    print_symbols("ST_N", 2, 9);
-    //print_symbols("ED_V", 3, 10);
+    print_symbols(lcdt, "MASS", 0, 9);
+    print_symbols(lcdt, "MX_E", 1, 9);
+    print_symbols(lcdt, "ST_N", 2, 9);
+    //print_symbols(lcdt, "ED_V", 3, 10);
 
     dtostrf(DISTANCE, 0, 1, distance);    // 1 знак после запятой
     dtostrf(MIN_V, 0, 0, min_v);          // 0 знаков после запятой
@@ -90,13 +89,13 @@ void print_settings(){
     dtostrf(MAX_E, 0, 1, max_e);
     dtostrf(SHOT_N, 0, 0, shot_n); 
 
-    print_symbols(distance, 0, 5);
-    print_symbols(min_v, 1, 5);
-    print_symbols(max_v, 2, 5);
-    print_symbols(expected_v, 3, 5);
-    print_symbols(mass, 0, 14);
-    print_symbols(max_e, 1, 14);
-    print_symbols(shot_n, 2, 14);
+    print_symbols(lcdt, distance, 0, 5);
+    print_symbols(lcdt, min_v, 1, 5);
+    print_symbols(lcdt, max_v, 2, 5);
+    print_symbols(lcdt, expected_v, 3, 5);
+    print_symbols(lcdt, mass, 0, 14);
+    print_symbols(lcdt, max_e, 1, 14);
+    print_symbols(lcdt, shot_n, 2, 14);
 }
 
 // выводит символ числа на позицию в дисплее
@@ -127,21 +126,21 @@ void print_big_num_velocity(int num){
 }
 
 // стандартный вывод
-void default_print(){
-    print_symbols(l4r.v4, 0, 0);
-    print_symbols(l4r.v3, 1, 0);
-    print_symbols(l4r.v2, 2, 0);
-    print_symbols(l4r.v1, 3, 0);
+void default_print(LiquidCrystal_I2C lcdt){
+    print_symbols(lcdt, l4r.v4, 0, 0);
+    print_symbols(lcdt, l4r.v3, 1, 0);
+    print_symbols(lcdt, l4r.v2, 2, 0);
+    print_symbols(lcdt, l4r.v1, 3, 0);
 
-    print_symbols(rounds_per_session, 0, 5);
-    print_symbols(avg_v_last_n, 1, 5);
-    print_symbols(avg_v_last_session, 2, 5);
-    print_symbols(w_code, 3, 5);
+    print_symbols(lcdt, rounds_per_session, 0, 5);
+    print_symbols(lcdt, avg_v_last_n, 1, 5);
+    print_symbols(lcdt, avg_v_last_session, 2, 5);
+    print_symbols(lcdt, w_code, 3, 5);
 
-    print_symbols("R", 0, 4);
-    print_symbols("N", 1, 4);
-    print_symbols("A", 2, 4);
-    print_symbols("S", 3, 4);
+    print_symbols(lcdt, "R", 0, 4);
+    print_symbols(lcdt, "N", 1, 4);
+    print_symbols(lcdt, "A", 2, 4);
+    print_symbols(lcdt, "S", 3, 4);
 
     print_big_num_velocity(new_v);
 }
@@ -183,15 +182,15 @@ double zamer_v(int time_s, int time_e){
     return DISTANCE / (time_e - time_s);
 }
 
-void print_data_field(char* code_e){
-    print_symbols(code_e, 3, 4);
+void print_data_field(LiquidCrystal_I2C lcdt, char* code_e){
+    print_symbols(lcdt, code_e, 3, 4);
 }
 
 // получить энергию в джоулях
 double zamer_e(double v, double mass){
     double e = mass/1000 * v * v / 2;
     if (e > MAX_E){ 
-        print_data_field("WDE");
+        print_data_field(lcd, "WDE");
     }
     return e;
 }
@@ -221,18 +220,18 @@ double get_avg_v_last_session(){
 double get_validate_shot_v(double shot_v){
     double shot_vt;
     if (shot_v < 0){
-        print_data_field("WM0");
+        w_code = "WM0";
         return EXPECTED_V;
     }
     if (shot_vt < MIN_V){
-        print_data_field("WMm");
+        w_code = "WMm";
         return EXPECTED_V;
     }
     if (shot_vt > MAX_V){
-        print_data_field("WMn");
+        w_code = "WMn";
         return EXPECTED_V;
     }
-    print_data_field("NS");
+    w_code = "NS";
     return shot_v;
 }
 
@@ -255,11 +254,11 @@ void setup() {
         lcd.clear();
         delay(TIME_LED);
     }
-    print_settings();
+    print_settings(lcd);
     delay(TIME_LED*15);
     lcd.clear();
     new_queue_n(&quen, SHOT_N);
-    default_print();
+    default_print(lcd);
 }
 
 // обновление стандартного экрана
@@ -272,10 +271,12 @@ void update(){
     avg_v_last_n = get_avg_v_last_n(&quen);
     avg_v_last_session = get_avg_v_last_session();
     update_l4r(l4r, new_v);
-    default_print();
+    default_print(lcd);
 }
 
 // главный цикл
 void loop() {
-    
+    if (finish && start){
+        update();
+    }
 }
