@@ -185,14 +185,15 @@ void print_204(int matrix[4][20]){
     }
 }
 
+
+void print_data_field(LiquidCrystal_I2C lcdt, char* code_e){
+    print_symbols(lcdt, code_e, 3, 4);
+}
+
 // получить скорость выстрела(м/c)
 double zamer_v(unsigned long time_s, unsigned long time_e){
     if (time_e - time_s < 0) return -1;
     return DISTANCE / (time_e - time_s);
-}
-
-void print_data_field(LiquidCrystal_I2C lcdt, char* code_e){
-    print_symbols(lcdt, code_e, 3, 4);
 }
 
 // получить энергию в джоулях
