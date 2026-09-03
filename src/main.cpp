@@ -38,13 +38,14 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 double summ_v;
 unsigned int rounds_per_session = 0;
 double new_v = 0;
-double avg_v_last_n;       // средняя скорость выстрела за SHOT_N шаров
-double avg_v_last_session; // средняя скорость выстрела за сессию
-const char *w_code = "NS";
+double avg_v_last_n = 0;       // средняя скорость выстрела за SHOT_N шаров
+double avg_v_last_session = 0; // средняя скорость выстрела за сессию
+const char *w_code = " NS";
 bool start = false;
 bool finish = false;
 volatile unsigned long start_time = 0;
 volatile bool shot_detected = false;
+bool PROGRAM_START = false;
 
 // НАСТРОЙКИ
 double DISTANCE         = 0.1; // расстояние                            (м)      DIST
@@ -53,7 +54,7 @@ double MAX_V            = 150; // максимальная скорость вы
 double EXPECTED_V       = 120; // ожидаемая скорость                    (м/с)    ED_V
 double MASS             = 0.3; // вес шара                              (г)      MASS
 double MAX_E            = 3.0; // максимальная энергия выстрела         (джоуль) MX_E
-unsigned int SHOT_N     = 100; // количество выстрелов для замеров      (штук)   ST_N
+unsigned int SHOT_N     = 5; // количество выстрелов для замеров      (штук)   ST_N
 
 // вывод символов
 void print_symbols(LiquidCrystal_I2C lcdt, const char* symbols, int row, int col){
@@ -110,7 +111,7 @@ void print_settings(LiquidCrystal_I2C lcdt){
 void print_custom_sybmol_num(int num, int lcd_i){
     if (num < 0 || num > 9 || (lcd_i != FIRST_IN && lcd_i != SECOND_IN && lcd_i != THIRD_IN)) return;
     if (num == 0 && lcd_i == FIRST_IN) return;
-    if (new_v == 0 && lcd_i == SECOND_IN) return;
+    if (PROGRAM_START && new_v == 0 && lcd_i == SECOND_IN) return;
     for (int row = 0; row < 4; row++){
         for (int col = 0; col < 4; col++){
             int val = custom_nums[num][row][col];
@@ -186,7 +187,7 @@ void print_204(int matrix[4][20]){
 }
 
 
-void print_data_field(LiquidCrystal_I2C lcdt, char* code_e){
+void print_data_field(LiquidCrystal_I2C lcdt, const char* code_e){
     print_symbols(lcdt, code_e, 3, 4);
 }
 
@@ -214,7 +215,7 @@ double get_avg_v_last_n(queue_n *quen){
     int k = 0;
     
     while (temp != NULL && k < SHOT_N){
-        all_t += temp->value;
+        all_t += DISTANCE / temp->value;
         temp = temp->next;
         k++;
     }
@@ -265,10 +266,12 @@ void on_shot_end() {
 double get_new_v(){
     if (finish) {
         finish = false;
-        return new_v;
+        return rand() % static_cast<int>(MAX_V);
+        //return new_v;
     }
     return 0;
 }
+
 
 // старт программы
 void setup() {
@@ -292,6 +295,8 @@ void setup() {
     pinMode(SENSOR_PIN_2, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(SENSOR_PIN_1), on_shot_start, RISING);
     attachInterrupt(digitalPinToInterrupt(SENSOR_PIN_2), on_shot_end, RISING);
+    PROGRAM_START = true;
+    Serial.begin(9600);
 }
 
 // обновление стандартного экрана
@@ -302,10 +307,12 @@ void update(){
     summ_v += new_v;
     qn_add(&quen, new_v);
     avg_v_last_n = get_avg_v_last_n(&quen);
+    Serial.print(avg_v_last_n);
     avg_v_last_session = get_avg_v_last_session();
-    update_l4r(l4r, new_v);
+    update_l4r(&l4r, new_v);
     start = false;
     finish = false;
+    lcd.clear();
     default_print(lcd);
 }
 
@@ -314,4 +321,7 @@ void loop() {
     if (finish && start){
         update();
     }
+    delay(2000);
+    finish = true;
+    start = true;
 }
