@@ -161,7 +161,7 @@ void print_big_symbol_letter(char letter, int lcd_i){
     
     for (int row = 0; row < 4; row++){
         for (int col = 0; col < 4; col++){
-            int val = custom_letters[letter][row][col];
+            int val = custom_letters[static_cast<int>(letter)][row][col];
             lcd.setCursor(lcd_i + col, row);
             if (val == 8) {
                 lcd.write(255);  // Полный блок 
@@ -212,7 +212,7 @@ double get_avg_v_last_n(queue_n *quen){
     
     double all_t = 0;
     noda_n* temp = quen->head;
-    int k = 0;
+    unsigned int k = 0;
     
     while (temp != NULL && k < SHOT_N){
         all_t += DISTANCE / temp->value;
